@@ -98,6 +98,36 @@ High-speed connectivity and latency testing tool:
 - `--id`, `-i`: Servo ID (default: 1)
 - `--delay`, `-d`: Delay between pings in milliseconds (default: 0)
 
+#### 3. Motor Mode Test (`test-motor-mode.py`)
+
+Demonstrates continuous rotation motor mode and automatic mode switching:
+
+```bash
+./test-motor-mode.py
+```
+
+**Features:**
+- Tests switching between servo mode (position control) and motor mode (continuous rotation)
+- Demonstrates torque-based speed control (0-100% torque)
+- Controls rotation direction (CW/CCW)
+- Automatic mode switching when calling servo/motor functions
+- Position logging during motor operation with matplotlib visualization
+
+**Motor Mode Example:**
+```python
+# Switch to motor mode and rotate clockwise at 50% torque
+servo.motor_speed(50, cw=True)
+
+# Rotate counter-clockwise at 30% torque
+servo.motor_speed(30, cw=False)
+
+# Stop motor
+servo.motor_speed(0)
+
+# Automatically switches back to servo mode when setting angle
+servo.set_angle(180, time_ms=1000)
+```
+
 Make sure to update the `SERIAL_PORT` variable in the scripts to match your system:
 - Linux: `/dev/ttyUSB0` or `/dev/ttyACM0`
 - Windows: `COM3`, `COM4`, etc.
@@ -108,7 +138,7 @@ Make sure to update the `SERIAL_PORT` variable in the scripts to match your syst
 ### Basic Example
 
 ```python
-from ocservo import OCServo
+from OCServo import OCServo
 
 # Create servo instance
 servo = OCServo(port='/dev/ttyUSB0', servo_id=1)
@@ -117,16 +147,23 @@ servo = OCServo(port='/dev/ttyUSB0', servo_id=1)
 if servo.ping():
     print("Servo connected!")
 
+# SERVO MODE - Position Control
 # Move to 180 degrees
 servo.set_angle(180, time_ms=1000)  # 1 second movement
 
-# Read current position (returns angle in degrees by default)
+# Read current position
 angle = servo.read_position()
 print(f"Current angle: {angle}°")
 
-# Or read raw position value (0-4095)
-raw_position = servo.read_position(raw_angle=True)
-print(f"Raw position: {raw_position}")
+# MOTOR MODE - Continuous Rotation
+# Rotate clockwise at 75% torque
+servo.motor_speed(75, cw=True)
+
+# Rotate counter-clockwise at 50% torque
+servo.motor_speed(50, cw=False)
+
+# Stop motor
+servo.motor_speed(0)
 
 # Read temperature
 temp = servo.read_temperature()
@@ -156,12 +193,22 @@ OCServo(port, baudrate=1000000, servo_id=1)
   - Returns raw position (0-4095) if `raw_angle=True`
 
 **Movement Control:**
+
+*Servo Mode (Position Control):*
 - `set_angle(angle, time_ms=0)`: Set servo angle (0-360°)
   - `angle`: Target angle in degrees
   - `time_ms`: Time to reach position in milliseconds (0 = max speed)
+  - Automatically switches from motor mode to servo mode if needed
 - `set_speed(speed)`: Set servo speed (0-1023)
   - 0 = stopped
   - 1-1023 = speed levels (1023 is maximum speed)
+
+*Motor Mode (Continuous Rotation):*
+- `motor_speed(torque_percent, cw=True)`: Set motor speed and direction
+  - `torque_percent`: Torque as percentage (0-100)
+  - `cw`: True for clockwise, False for counter-clockwise
+  - Automatically switches from servo mode to motor mode if needed
+  - Use `motor_speed(0)` to stop the motor
 
 **Utility Functions:**
 - `position_to_angle(position)`: Convert raw position (0-4095) to angle (0-360°)
@@ -170,11 +217,20 @@ OCServo(port, baudrate=1000000, servo_id=1)
 - `is_connected()`: Check if serial port is open and connected
 - `reconnect()`: Attempt to reconnect to the serial port
 
-## Notes
+## Technical Notes
 
+### Mode Switching
+- The servo has two operating modes: **Servo Mode** (position control) and **Motor Mode** (continuous rotation)
+- Mode switching is automatic when using `set_angle()` or `motor_speed()` functions
+- The library tracks the current mode internally to minimize unnecessary mode changes
+- When switching from motor mode to servo mode, the servo will move to the specified angle
+- When switching from servo mode to motor mode, the servo will start rotating continuously
+
+### Protocol Details
 - Default baud rate is 1M (1000000)
 - Position range: 0-4095 (corresponds to 0-360°)
 - Time parameter in `set_angle()`: 0 = maximum speed
+- Motor mode torque: 0-100% (internally mapped to 0-1000)
 - Make sure your RS485 adapter supports the required baud rate
 
 ## Troubleshooting
