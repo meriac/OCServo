@@ -28,6 +28,9 @@ class OCServo:
 
     # Memory addresses
     ADDR_ID = 0x05
+    ADDR_P_GAIN = 0x15
+    ADDR_D_GAIN = 0x16
+    ADDR_I_GAIN = 0x17
     ADDR_RUNNING_MODE = 0x23
     ADDR_GOAL_POSITION_L = 0x2A
     ADDR_GOAL_POSITION_H = 0x2B
@@ -146,9 +149,6 @@ class OCServo:
                 print(self._hexdump(packet_bytes, "TX"))
             self.ser.write(packet_bytes)
             self.ser.flush()  # Ensure data is sent
-
-            # Small delay to allow servo to process
-            time.sleep(0.002)  # 2ms delay
 
             # Always read response
             response = self._read_response()
@@ -368,6 +368,27 @@ class OCServo:
     def angle_to_position(self, angle):
         """Convert angle in degrees (0-360) to position value (0-4095)"""
         return int(angle * 4095 / 360)
+
+    def set_gain(self, p_gain):
+        """
+        Set the proportional (P) gain for PID control
+
+        Args:
+            p_gain: Proportional gain value (1-15)
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        # Limit to valid range (1-15)
+        p_gain = max(1, min(15, p_gain))
+
+        # Set P gain
+        response1 = self._send_packet(self.INST_WRITE, [self.ADDR_P_GAIN, p_gain])
+        # Set I and D gains to 0
+        response2 = self._send_packet(self.INST_WRITE, [self.ADDR_I_GAIN, 0])
+        response3 = self._send_packet(self.INST_WRITE, [self.ADDR_D_GAIN, 0])
+
+        return response1 is not None and response2 is not None and response3 is not None
 
     def is_connected(self):
         """Check if serial port is open and connected"""

@@ -128,6 +128,29 @@ servo.motor_speed(0)
 servo.set_angle(180, time_ms=1000)
 ```
 
+#### 4. Acceleration Test (`test-acceleration.py`)
+
+Demonstrates PID gain tuning effects on servo acceleration and deceleration:
+
+```bash
+./test-acceleration.py
+```
+
+**Features:**
+- Tests different P gain values (1, 3, 6, 9, 12, 15) to show their effect on motion
+- Records position data during step response (90° → 270° instant command)
+- Plots all response curves on a single chart for comparison
+- Shows how P gain affects:
+  - Acceleration rate
+  - Overshoot
+  - Settling time
+  - Steady-state error
+
+**Example output:**
+- Lower P gains (1-3): Slow, gentle acceleration
+- Medium P gains (6-9): Balanced speed and stability
+- Higher P gains (12-15): Fast acceleration
+
 Make sure to update the `SERIAL_PORT` variable in the scripts to match your system:
 - Linux: `/dev/ttyUSB0` or `/dev/ttyACM0`
 - Windows: `COM3`, `COM4`, etc.
@@ -202,6 +225,11 @@ OCServo(port, baudrate=1000000, servo_id=1)
 - `set_speed(speed)`: Set servo speed (0-1023)
   - 0 = stopped
   - 1-1023 = speed levels (1023 is maximum speed)
+- `set_gain(p_gain)`: Set proportional (P) gain for PID control
+  - `p_gain`: Proportional gain value (clipped to 1-15 range)
+  - Also sets I and D gains to 0
+  - Affects acceleration, deceleration, and position tracking behavior
+  - Returns True if successful
 
 *Motor Mode (Continuous Rotation):*
 - `motor_speed(torque_percent, cw=True)`: Set motor speed and direction
