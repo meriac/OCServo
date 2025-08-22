@@ -38,9 +38,31 @@ class OCServo:
     ADDR_GOAL_TIME_H = 0x2D
     ADDR_GOAL_SPEED_L = 0x2E
     ADDR_GOAL_SPEED_H = 0x2F
+    ADDR_LOCK = 0x30  # Lock register address
     ADDR_CURRENT_POSITION_L = 0x38
     ADDR_CURRENT_POSITION_H = 0x39
     ADDR_TEMPERATURE = 0x3F
+
+    # Class variables for lock settings (immutable tuples)
+    # Addresses that remain writable when servo is locked
+    ADDR_WRITABLE_WHEN_LOCKED = (
+        ADDR_GOAL_POSITION_L,
+        ADDR_GOAL_POSITION_H,
+        ADDR_GOAL_TIME_L,
+        ADDR_GOAL_TIME_H,
+        ADDR_GOAL_SPEED_L,
+        ADDR_GOAL_SPEED_H
+    )
+
+    # Addresses that are protected when servo is locked
+    ADDR_PROTECTED_WHEN_LOCKED = (
+        ADDR_ID,
+        ADDR_P_GAIN,
+        ADDR_D_GAIN,
+        ADDR_I_GAIN,
+        ADDR_RUNNING_MODE,
+        ADDR_LOCK
+    )
 
     def __init__(self, port, baudrate=1000000, servo_id=1):
         """
@@ -268,6 +290,88 @@ class OCServo:
             return pos if raw_angle else self.position_to_angle(pos)
         return None
 
+    def read_voltage(self):
+        """
+        Read servo input voltage
+
+        Returns:
+            Voltage in volts (0.1V resolution) or None
+        """
+        response = self._send_packet(self.INST_READ, [0x3E, 0x01])  # Address 0x3E for voltage
+        if response and response['parameters']:
+            # Value is in units of 0.1V
+            return response['parameters'][0] / 10.0
+        return None
+
+    def read_speed(self):
+        """
+        Read current servo speed
+
+        Returns:
+            Speed value or None
+        """
+        response = self._send_packet(self.INST_READ, [0x3A, 0x02])  # Address 0x3A-0x3B for speed
+        if response and len(response['parameters']) >= 2:
+            speed_l = response['parameters'][0]
+            speed_h = response['parameters'][1]
+            return speed_l + (speed_h << 8)
+        return None
+
+    def read_load(self):
+        """
+        Read current servo load/torque
+
+        Returns:
+            Load value or None
+        """
+        response = self._send_packet(self.INST_READ, [0x3C, 0x02])  # Address 0x3C-0x3D for load
+        if response and len(response['parameters']) >= 2:
+            load_l = response['parameters'][0]
+            load_h = response['parameters'][1]
+            load_value = load_l + (load_h << 8)
+            # Bit 10 indicates direction (0=CCW, 1=CW)
+            direction = "CW" if load_value & 0x400 else "CCW"
+            magnitude = load_value & 0x3FF
+            return {'magnitude': magnitude, 'direction': direction}
+        return None
+
+    def read_current(self):
+        """
+        Read servo current consumption
+
+        Returns:
+            Current in mA or None
+        """
+        response = self._send_packet(self.INST_READ, [0x45, 0x02])  # Address 0x45-0x46 for current
+        if response and len(response['parameters']) >= 2:
+            current_l = response['parameters'][0]
+            current_h = response['parameters'][1]
+            return current_l + (current_h << 8)
+        return None
+
+    def read_servo_status(self):
+        """
+        Read comprehensive servo status
+
+        Returns:
+            Dictionary with all status information or None
+        """
+        status = {}
+
+        # Read all available parameters
+        status['id'] = self.servo_id
+        status['temperature'] = self.read_temperature()
+        status['position'] = self.read_position()
+        status['voltage'] = self.read_voltage()
+        status['speed'] = self.read_speed()
+        status['load'] = self.read_load()
+        status['current'] = self.read_current()
+
+        # Check if servo is responding
+        status['responding'] = self.ping()
+
+        return status
+
     def set_angle(self, angle, time_ms=0):
         """
         Set servo angle
@@ -415,3 +519,96 @@ class OCServo:
             if self._debug:
                 print(f"Reconnection failed: {e}")
             return False
+
+    def read_lock_status(self):
+        """
+        Read the lock status of the servo
+
+        Returns:
+            int: Lock status value (0=unlocked, 1=locked) or None on error
+        """
+        response = self._send_packet(self.INST_READ, [self.ADDR_LOCK, 0x01])
+        if response and response['parameters']:
+            return response['parameters'][0]
+        return None
+
+    def check_lock_settings(self):
+        """
+        Check comprehensive lock settings and protection status
+
+        Returns:
+            dict: Dictionary containing lock status information:
+                - 'locked': Boolean indicating if servo is locked
+                - 'lock_value': Raw lock register value
+                - 'writable_addresses': List of addresses that can be written
+                - 'protected_addresses': List of protected addresses
+                - 'status_message': Human-readable status message
+            None: If unable to read lock status
+        """
+        lock_value = self.read_lock_status()
+
+        if lock_value is None:
+            return None
+
+        # Determine lock status
+        is_locked = lock_value == 1
+
+        # Create status message and determine which addresses are accessible
+        if is_locked:
+            status_message = "Servo is LOCKED - Configuration parameters are protected"
+            writable = list(self.ADDR_WRITABLE_WHEN_LOCKED)
+            protected = list(self.ADDR_PROTECTED_WHEN_LOCKED)
+        else:
+            status_message = "Servo is UNLOCKED - All parameters can be modified"
+            writable = list(self.ADDR_WRITABLE_WHEN_LOCKED) + list(self.ADDR_PROTECTED_WHEN_LOCKED)
+            protected = []
+
+        return {
+            'locked': is_locked,
+            'lock_value': lock_value,
+            'writable_addresses': writable,
+            'protected_addresses': protected,
+            'status_message': status_message
+        }
+
+    def lock(self, lock_state=True):
+        """
+        Lock or unlock the servo's EEPROM settings
+
+        Args:
+            lock_state: True to lock (protect settings), False to unlock
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        lock_value = 1 if lock_state else 0
+
+        # Send lock command
+        response = self._send_packet(self.INST_WRITE, [self.ADDR_LOCK, lock_value])
+
+        if response is not None:
+            # Verify the lock state was set correctly
+            time.sleep(0.1)  # Small delay for EEPROM write
+            current_lock = self.read_lock_status()
+
+            if current_lock == lock_value:
+                if self._debug:
+                    print(f"Servo {'locked' if lock_state else 'unlocked'} successfully")
+                return True
+            else:
+                if self._debug:
+                    print(f"Failed to {'lock' if lock_state else 'unlock'} servo - verification failed")
+                return False
+        else:
+            if self._debug:
+                print(f"Failed to send {'lock' if lock_state else 'unlock'} command")
+            return False
+
+    def unlock(self):
+        """
+        Unlock the servo's EEPROM settings (convenience method)
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        return self.lock(False)
